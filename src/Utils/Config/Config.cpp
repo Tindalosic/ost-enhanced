@@ -94,8 +94,20 @@ namespace {
             return result;
         }
 
-        try {
-            auto tbl = toml::parse_file(configPath);
+        toml::table cfgTable;
+        bool cfgOk = false;
+        {
+            auto parsed = toml::parse_file(configPath);
+            if (parsed.failed()) {
+                LOG_WARN("Config parse error: {}", parsed.error().description());
+            } else {
+                cfgTable = std::move(parsed).table();
+                cfgOk = true;
+            }
+        }
+
+        if (cfgOk) {
+            toml::table& tbl = cfgTable;
 
             // [manifest]
             if (auto manifest = tbl["manifest"].as_table()) {
@@ -176,9 +188,7 @@ namespace {
                      snapshot.remoteUrlTemplate.empty() ? "<default>" : snapshot.remoteUrlTemplate);
             return result;
 
-        } catch (const toml::parse_error& e) {
-            LOG_WARN("Config parse error: {}", e.what());
-        } catch (...) {
+        } else {
             LOG_WARN("Config load failed");
         }
         bool shouldApplyDefault = false;

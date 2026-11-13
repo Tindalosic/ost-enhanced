@@ -130,12 +130,12 @@ static PatternMap TableToPatternMap(const toml::table& tbl)
 static PatternMap ParsePatternString(std::string_view body,
                                      std::string* outError = nullptr)
 {
-    try {
-        return TableToPatternMap(toml::parse(body));
-    } catch (const toml::parse_error& e) {
-        if (outError) *outError = e.description();
+    auto parsed = toml::parse(body);
+    if (parsed.failed()) {
+        if (outError) *outError = parsed.error().description();
         return {};
     }
+    return TableToPatternMap(std::move(parsed).table());
 }
 
 // ---- popup helpers (detached threads so we never block Steam) ----

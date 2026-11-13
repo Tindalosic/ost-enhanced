@@ -1,4 +1,4 @@
-#include "HookManager.h"
+﻿#include "HookManager.h"
 #include "Hooks_CallBack.h"
 #include "Hooks_Decryption.h"
 #include "Hooks_IPC.h"
@@ -26,6 +26,7 @@ namespace SteamClient {
     void CoreHook() {
         Hooks_CallBack::Install();
         Hooks_Decryption::Install();
+        Hooks_Decryption::StartTicketDump(SteamInstallPath);
         Hooks_IPC::Install();
         // Hooks_KeyValues::Install();
         Hooks_Manifest::Install();

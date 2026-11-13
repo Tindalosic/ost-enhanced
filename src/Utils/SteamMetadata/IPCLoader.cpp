@@ -171,12 +171,14 @@ bool Load(const std::string& steamclientPath)
     }
 
     toml::table root;
-    try {
-        root = toml::parse(r.body);
-    } catch (const toml::parse_error& e) {
-        LOG_WARN("IPCLoader: TOML parse error: {}", e.description());
-        ShowMissingPopup(r.sha256);
-        return false;
+    {
+        auto parsed = toml::parse(std::string_view(r.body));
+        if (parsed.failed()) {
+            LOG_WARN("IPCLoader: TOML parse error: {}", parsed.error().description());
+            ShowMissingPopup(r.sha256);
+            return false;
+        }
+        root = std::move(parsed).table();
     }
 
     for (auto& [key, val] : root) {

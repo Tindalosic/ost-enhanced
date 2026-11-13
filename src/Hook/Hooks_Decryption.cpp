@@ -1,7 +1,12 @@
-#include "Hooks_Decryption.h"
+﻿#include "Hooks_Decryption.h"
 #include "HookMacros.h"
 #include "dllmain.h"
+#include <windows.h>
 #include <string>
+#include <thread>
+#include <chrono>
+#include <fstream>
+#include <sstream>
 
 namespace {
 
@@ -55,6 +60,83 @@ namespace {
         LOG_DECRYPTIONKEY_DEBUG("GetConfigStoreLocalBinary: got value for KeyName='{}' ({} bytes)",
                                 keyName, value.size());
         return value;
+    }
+}
+
+
+namespace Hooks_Decryption {
+    namespace {
+        std::string JoinPath(const std::string& a, const std::string& b) {
+            if (a.empty()) return b;
+            if (a.back() == '\\' || a.back() == '/') return a + b;
+            return a + "\\" + b;
+        }
+
+        void DumpTicketFor(const std::string& root, const std::string& appId) {
+            const auto ticket = GetCacheAppOwnershipTicket(static_cast<AppId_t>(std::stoul(appId)));
+            if (ticket.empty()) {
+                LOG_DECRYPTIONKEY_DEBUG("ticket dump: no cached ticket for {}", appId);
+                return;
+            }
+            const std::string dir = JoinPath(JoinPath(root, "opensteamtool"), "tickets");
+            CreateDirectoryA(JoinPath(root, "opensteamtool").c_str(), nullptr);
+            CreateDirectoryA(dir.c_str(), nullptr);
+            const std::string file = JoinPath(dir, appId + ".bin");
+            std::ofstream out(file, std::ios::binary | std::ios::trunc);
+            if (!out) {
+                LOG_DECRYPTIONKEY_WARN("ticket dump: cannot open {}", file);
+                return;
+            }
+            out.write(reinterpret_cast<const char*>(ticket.data()), static_cast<std::streamsize>(ticket.size()));
+            out.close();
+            LOG_DECRYPTIONKEY_INFO("ticket dump: wrote {} ({} bytes)", file, ticket.size());
+        }
+    }
+
+    void StartTicketDump(const char* steamRoot) {
+        if (!steamRoot || !*steamRoot) return;
+        const std::string root(steamRoot);
+        std::thread([root] {
+            // ConfigStore pointer is only captured after Steam touches user
+            // local storage, so poll instead of assuming an ordering.
+            for (int i = 0; i < 240; ++i) {
+                if (g_pConfigStoreLocal) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            }
+            if (!g_pConfigStoreLocal) {
+                LOG_DECRYPTIONKEY_WARN("ticket dump: ConfigStore never captured, abort");
+                return;
+            }
+
+            const std::string req = JoinPath(JoinPath(root, "opensteamtool"), "ticket_request.txt");
+            std::ifstream in(req);
+            if (!in) {
+                LOG_DECRYPTIONKEY_DEBUG("ticket dump: no request file at {}", req);
+                return;
+            }
+
+            int done = 0;
+            std::string line;
+            while (std::getline(in, line)) {
+                while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t'))
+                    line.pop_back();
+                if (line.empty() || line[0] == '#') continue;
+                // accept "appid" or "appid<whitespace>name"
+                const auto sp = line.find_first_of(" \t");
+                const std::string id = line.substr(0, sp);
+                if (id.empty()) continue;
+                bool digits = true;
+                for (char c : id) if (c < '0' || c > '9') { digits = false; break; }
+                if (!digits) continue;
+                try { DumpTicketFor(root, id); ++done; } catch (...) {}
+            }
+            in.close();
+
+            const std::string doneFile = JoinPath(JoinPath(root, "opensteamtool"), "ticket_dump.done");
+            std::ofstream out(doneFile, std::ios::trunc);
+            if (out) { out << done; out.close(); }
+            LOG_DECRYPTIONKEY_INFO("ticket dump: finished, {} apps processed", done);
+        }).detach();
     }
 }
 
